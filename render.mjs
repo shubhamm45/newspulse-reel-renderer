@@ -127,9 +127,15 @@ async function main() {
     brandName: clean(body.brandName) || 'NEWS PULSE',
     backgroundMusicUrl: clean(body.backgroundMusicUrl),
     eventDate: clean(body.eventDate),
+    hookText: clean(body.hookText),
+    voiceoverUrl: clean(body.voiceoverUrl),
   };
   for (const key of ['reelVideoUrl', 'headline', 'sourceTitle', 'sourceUrl']) {
     if (!payload[key]) throw new Error(`Missing render field: ${key}.`);
+  }
+  if (payload.voiceoverUrl) {
+    const vu = new URL(payload.voiceoverUrl);
+    if (!['https:', 'http:'].includes(vu.protocol)) throw new Error('Voiceover URL must use HTTP(S).');
   }
   const source = new URL(payload.reelVideoUrl);
   if (source.protocol !== 'https:') throw new Error('Source video must use HTTPS.');
@@ -164,6 +170,22 @@ async function main() {
         }
         musicFile = candidate;
       } catch { musicFile = null; }
+    }
+
+    // Voiceover narration. Fail-closed: a silent reel is worse than no reel.
+    let voiceFile = null;
+    if (payload.voiceoverUrl) {
+      const candidate = join(work, 'voice.bin');
+      await run('curl', ['--fail', '--silent', '--show-error', '--location',
+        '--max-time', '120', '--output', candidate, payload.voiceoverUrl],
+      { timeout: 150000 });
+      const { stdout: vprobe } = await run('ffprobe',
+        ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', candidate],
+        { timeout: 30000 });
+      if (!String(vprobe).split('\n').some((l) => l.trim() === 'audio')) {
+        throw new Error('voiceover has no audio stream');
+      }
+      voiceFile = candidate;
     }
 
     // Probe the download so we can tell stills from video and size loops.
@@ -201,10 +223,13 @@ async function main() {
       cards = [payload.instagramCaption.split(/\n\s*\n/)[0].slice(0, 150)];
     }
     cards = cards.map((c) => clean(c).slice(0, 150)).filter(Boolean).slice(0, 2);
+    // Hook-first opening: giant hook for the first ~2s, then the story layout.
+    const hasHook = Boolean(payload.hookText);
+    const storyStart = hasHook ? 2.4 : 0.2;
     let windows = [];
-    if (cards.length >= 2 && dur >= 13) windows = [[1.4, 6.6], [7.2, Math.min(12.6, dur - 0.8)]];
-    else if (cards.length >= 2) windows = [[1.2, dur * 0.45], [dur * 0.52, dur - 0.8]];
-    else if (cards.length === 1) windows = [[1.2, Math.max(4, dur - 1.0)]];
+    if (cards.length >= 2 && dur >= 13) windows = [[storyStart + 0.2, 7.4], [8.0, Math.min(13.4, dur - 0.8)]];
+    else if (cards.length >= 2) windows = [[storyStart + 0.2, dur * 0.45], [dur * 0.52, dur - 0.8]];
+    else if (cards.length === 1) windows = [[storyStart + 0.2, Math.max(4, dur - 1.0)]];
 
     // Text files (drawtext textfile= avoids filter-string injection from copy).
     const headlineFile = join(work, 'headline.txt');
@@ -223,6 +248,11 @@ async function main() {
     }
     const publisher = payload.sourcePublisher || hostLabel(payload.sourceUrl);
     await writeFile(sourceFile, `Source: ${wrap(publisher, 52, 1, 40)}`, 'utf8');
+    let hookFile = null;
+    if (hasHook) {
+      hookFile = join(work, 'hook.txt');
+      await writeFile(hookFile, wrap(payload.hookText, 16, 2, 48), 'utf8');
+    }
 
     // Background: cover 1080x1920.
     const inputs = [];
@@ -251,6 +281,9 @@ async function main() {
     inputs.push('-f', 'lavfi', '-i', `color=s=${W}x${topH}:r=30:d=${dur.toFixed(2)}:color=black`);
     vf.push(`[2:v]format=rgba,geq=r=8:g=14:b=26:a='130*(1-Y/H)'[topscrim]`);
     if (musicFile) inputs.push('-stream_loop', '-1', '-i', musicFile);
+    const musicIdx = musicFile ? 3 : -1;
+    let voiceIdx = -1;
+    if (voiceFile) { inputs.push('-i', voiceFile); voiceIdx = musicFile ? 4 : 3; }
     vf.push(`[bg][topscrim]overlay=0:0:format=auto[bg2]`);
     vf.push(`[bg2][scrim]overlay=0:${scrimTop}:format=auto[base]`);
 
@@ -263,10 +296,16 @@ async function main() {
       dt.push(`drawtext=${F}:textfile=${dateFile}:fontcolor=white:fontsize=30:x=60:y=278:alpha=0.9`);
     }
     dt.push(`drawtext=${F}:text='AI-GENERATED VISUALS':fontcolor=0xB9C2D0:fontsize=26:x=w-text_w-60:y=240:alpha=0.85`);
+    if (hookFile) {
+      dt.push(
+        `drawtext=${F}:textfile=${hookFile}:fontcolor=white:fontsize=104:line_spacing=10:` +
+        `x=(w-text_w)/2:y=(h-text_h)/2-120:alpha='${envelope(0.1, 2.2, 0.4)}'`
+      );
+    }
     dt.push(`drawbox=x=60:y=1124:w=132:h=8:color=0xE63946:t=fill`);
     dt.push(
       `drawtext=${F}:textfile=${headlineFile}:fontcolor=white:fontsize=58:line_spacing=12:` +
-      `x=60:y=1160:alpha='${holdIn(0.2)}'`
+      `x=60:y=1160:alpha='${holdIn(storyStart)}'`
     );
     cards.forEach((card, i) => {
       const [s, e] = windows[i];
@@ -281,20 +320,31 @@ async function main() {
     );
     vf.push(`[base]${dt.join(',')},format=yuv420p[out]`);
 
+    // Audio: voiceover is primary; music bed ducked underneath; native video
+    // audio kept low when present. Voice is padded to the full duration so
+    // the mix never ends early.
+    const mixLabels = [];
+    if (voiceFile) {
+      vf.push(`[${voiceIdx}:a]volume=1.0,apad=whole_dur=${dur.toFixed(2)}[v_voice]`);
+      mixLabels.push('[v_voice]');
+    }
     if (musicFile) {
-      if (mode === 'video' && hasAudio) {
-        vf.push('[0:a:0]volume=1.0[src];[src][3:a]volume=0.14,amix=inputs=2:duration=first:dropout_transition=0[aout]');
-      } else {
-        vf.push('[3:a]volume=0.2[aout]');
-      }
+      vf.push(`[${musicIdx}:a]volume=${voiceFile ? 0.07 : 0.2}[v_mus]`);
+      mixLabels.push('[v_mus]');
+    }
+    if (mode === 'video' && hasAudio) {
+      vf.push(`[0:a:0]volume=${voiceFile ? 0.25 : 1.0}[v_src]`);
+      mixLabels.push('[v_src]');
+    }
+    const hasMixedAudio = mixLabels.length > 0;
+    if (hasMixedAudio) {
+      vf.push(`${mixLabels.join('')}amix=inputs=${mixLabels.length}:duration=first:dropout_transition=0[aout]`);
     }
 
     const ffmpegArgs = ['-y', '-hide_banner', '-loglevel', 'error', ...inputs,
       '-filter_complex', vf.join(';'), '-map', '[out]'];
-    if (musicFile) {
+    if (hasMixedAudio) {
       ffmpegArgs.push('-map', '[aout]', '-c:a', 'aac', '-b:a', '128k', '-shortest');
-    } else if (mode === 'video' && hasAudio) {
-      ffmpegArgs.push('-map', '0:a:0?', '-c:a', 'aac', '-shortest');
     } else {
       ffmpegArgs.push('-an');
     }
@@ -331,6 +381,7 @@ async function main() {
       width: 1080,
       height: 1920,
       renderer_version: VERSION,
+      voiceover: Boolean(voiceFile),
       created_at: new Date().toISOString(),
     };
     const reqDir = join(publicDir, 'requests');
