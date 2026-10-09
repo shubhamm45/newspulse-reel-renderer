@@ -1,0 +1,90 @@
+name: Render NewsPulse Reel
+run-name: Render ${{ github.event.head_commit.message }}
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'render-requests/*.json'
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: newspulse-reel-pages
+  cancel-in-progress: false
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install renderer deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+      - name: Find render request
+        id: request
+        run: |
+          # Find the JSON file added/changed in this push
+          FILE=$(git diff --name-only HEAD~1 HEAD -- 'render-requests/*.json' | head -1)
+          if [ -z "$FILE" ]; then
+            echo "No render request found in this push" >&2
+            exit 1
+          fi
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+          REQUEST_ID=$(basename "$FILE" .json)
+          echo "request_id=$REQUEST_ID" >> "$GITHUB_OUTPUT"
+          echo "Found request: $REQUEST_ID"
+      - name: Restore existing videos
+        run: |
+          mkdir -p public
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+            git fetch origin gh-pages
+            git archive FETCH_HEAD | tar -x -C public
+          fi
+      - name: Render and validate
+        env:
+          REQUEST_ID: ${{ steps.request.outputs.request_id }}
+          PAYLOAD_FILE: ${{ steps.request.outputs.file }}
+          BASE_URL: ${{ steps.pages.outputs.base_url }}
+        run: node render.mjs --payload "$PAYLOAD_FILE"
+      - name: Save public files for future runs
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+            git fetch origin gh-pages
+            git worktree add publish FETCH_HEAD
+          else
+            mkdir publish
+            git -C publish init
+          fi
+          cp -R public/. publish/
+          git -C publish config user.name 'github-actions[bot]'
+          git -C publish config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C publish add .
+          git -C publish commit -m 'Publish rendered reel'
+          commit=$(git -C publish rev-parse HEAD)
+          if [ -d publish/.git ]; then
+            git fetch ./publish HEAD
+            commit=$(git rev-parse FETCH_HEAD)
+          fi
+          git push origin "$commit:refs/heads/gh-pages"
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
