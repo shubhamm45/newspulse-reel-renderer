@@ -257,12 +257,12 @@ async function main() {
     const dt = [];
     const F = `fontfile=${FONT}`;
     const brand = String(payload.brandName || 'NEWS PULSE').replace(/[^A-Za-z0-9 ]/g, '').trim() || 'NEWS PULSE';
-    dt.push(`drawbox=x=60:y=64:w=22:h=22:color=0xE63946:t=fill`);
-    dt.push(`drawtext=${F}:text='${brand}':fontcolor=white:fontsize=36:x=98:y=60:alpha=0.95`);
+    dt.push(`drawbox=x=60:y=234:w=22:h=22:color=0xE63946:t=fill`);
+    dt.push(`drawtext=${F}:text='${brand}':fontcolor=white:fontsize=36:x=98:y=230:alpha=0.95`);
     if (dateFile) {
-      dt.push(`drawtext=${F}:textfile=${dateFile}:fontcolor=white:fontsize=30:x=60:y=108:alpha=0.9`);
+      dt.push(`drawtext=${F}:textfile=${dateFile}:fontcolor=white:fontsize=30:x=60:y=278:alpha=0.9`);
     }
-    dt.push(`drawtext=${F}:text='AI-GENERATED VISUALS':fontcolor=0xB9C2D0:fontsize=26:x=w-text_w-60:y=70:alpha=0.85`);
+    dt.push(`drawtext=${F}:text='AI-GENERATED VISUALS':fontcolor=0xB9C2D0:fontsize=26:x=w-text_w-60:y=240:alpha=0.85`);
     dt.push(`drawbox=x=60:y=1124:w=132:h=8:color=0xE63946:t=fill`);
     dt.push(
       `drawtext=${F}:textfile=${headlineFile}:fontcolor=white:fontsize=58:line_spacing=12:` +
@@ -277,7 +277,7 @@ async function main() {
     });
     dt.push(
       `drawtext=${F}:textfile=${sourceFile}:fontcolor=0x9AA5B8:fontsize=28:` +
-      `x=60:y=1720:alpha='${holdIn(1.0, 1.0)}'`
+      `x=60:y=1600:alpha='${holdIn(1.0, 1.0)}'`
     );
     vf.push(`[base]${dt.join(',')},format=yuv420p[out]`);
 
