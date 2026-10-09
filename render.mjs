@@ -272,12 +272,12 @@ async function main() {
       const [s, e] = windows[i];
       dt.push(
         `drawtext=${F}:textfile=${cardFiles[i]}:fontcolor=0xE9EEF7:fontsize=42:line_spacing=10:` +
-        `x=60:y=1470:alpha='${envelope(s, e)}'`
+        `x=60:y=1440:alpha='${envelope(s, e)}'`
       );
     });
     dt.push(
       `drawtext=${F}:textfile=${sourceFile}:fontcolor=0x9AA5B8:fontsize=28:` +
-      `x=60:y=1600:alpha='${holdIn(1.0, 1.0)}'`
+      `x=60:y=1640:alpha='${holdIn(1.0, 1.0)}'`
     );
     vf.push(`[base]${dt.join(',')},format=yuv420p[out]`);
 
