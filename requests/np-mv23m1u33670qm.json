@@ -1,0 +1,12 @@
+{
+  "request_id": "np-mv23m1u33670qm",
+  "status": "ready",
+  "video_url": "https://shubhamm45.github.io/newspulse-reel-renderer/reels/np-mv23m1u33670qm/reel.mp4",
+  "cover_url": "https://shubhamm45.github.io/newspulse-reel-renderer/reels/np-mv23m1u33670qm/cover.jpg",
+  "duration_seconds": 15,
+  "width": 1080,
+  "height": 1920,
+  "renderer_version": "news-card-v10",
+  "voiceover": true,
+  "created_at": "2026-10-10T07:56:02.345Z"
+}
